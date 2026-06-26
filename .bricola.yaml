@@ -1,0 +1,8 @@
+# Bricola.md 設定の例。
+# 実運用では「選択するリポジトリの直下」に置く（このファイルは見本）。
+# include の glob で対象 md を集め、exclude で差し引く。
+include:
+  - "**/*.md"
+exclude:
+  - "**/node_modules/**"
+  - "vendor/**"
