@@ -246,6 +246,7 @@
   // 現在の作業テキストをプレビューへ反映する。
   async function renderPreview() {
     el.preview.innerHTML = Bricola.render.toHtml(state.text);
+    Bricola.mermaid.enhance(el.preview);            // ```mermaid → SVG 図 (ADR-0012)
     renderOutline(Bricola.outline.build(el.preview));
     const path = Bricola.docstate.cur ? Bricola.docstate.cur.path : '';
     await Bricola.assets.resolve(el.preview, path); // 相対画像 (ADR-0008)

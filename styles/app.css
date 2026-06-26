@@ -361,3 +361,18 @@ body.right-collapsed .sidebar-right { display: none; }
   word-break: break-word;
 }
 .modal-actions { display: flex; justify-content: flex-end; gap: 10px; }
+
+/* Mermaid 図 (ADR-0012) */
+.mermaid-figure { margin: 1em 0; text-align: center; overflow-x: auto; }
+.mermaid-figure svg { max-width: 100%; height: auto; }
+.mermaid-error {
+  margin: 1em 0;
+  padding: 10px 12px;
+  border: 1px solid #e3a3a3;
+  border-radius: 6px;
+  background: rgba(220, 80, 80, 0.08);
+  color: #b00020;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.9em;
+}
