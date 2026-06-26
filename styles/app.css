@@ -229,6 +229,10 @@ body.right-collapsed .sidebar-right { display: none; }
 
 /* ---- Markdown 表示 ---- */
 .markdown-body { max-width: 860px; line-height: 1.7; font-size: 15px; }
+/* サイドバーを閉じたら中央プレビューの幅上限を広げ、空いた領域を使う */
+body.left-collapsed .markdown-body,
+body.right-collapsed .markdown-body { max-width: 1100px; }
+body.left-collapsed.right-collapsed .markdown-body { max-width: none; }
 /* 最下部に確実な余白（スクロールコンテナの padding は無視されやすいため擬似要素で） */
 .markdown-body::after { content: ''; display: block; height: 45vh; }
 .markdown-body h1, .markdown-body h2 { border-bottom: 1px solid var(--border); padding-bottom: .3em; }
@@ -255,17 +259,32 @@ body.right-collapsed .sidebar-right { display: none; }
   color: var(--fg-muted);
   border-left: 3px solid var(--border);
 }
+/* 横長テーブルはこのラッパ内だけが横スクロールする（tableui.js が付与） */
+.md-table-scroll { overflow-x: auto; max-width: 100%; margin: 1em 0; }
 .markdown-body table {
   border-collapse: collapse;
   width: 100%;
   margin: 1em 0;
   font-size: 14px;
 }
+.md-table-scroll > table { margin: 0; }
 .markdown-body th, .markdown-body td {
   border: 1px solid var(--border);
   padding: 6px 12px;
+  box-sizing: border-box; /* 列幅ドラッグの計算を offsetWidth と一致させる */
 }
-.markdown-body th { background: var(--bg-alt); }
+/* ヘッダは折り返さない（列が縦に潰れるのを防ぐ）。本文セルは折り返し維持 */
+.markdown-body th { background: var(--bg-alt); white-space: nowrap; position: relative; }
+
+/* 列幅調整ハンドル（tableui.js が各ヘッダ th に付与） */
+.mdv-col-resizer {
+  position: absolute; top: 0; right: 0; width: 6px; height: 100%;
+  cursor: col-resize; user-select: none; z-index: 1;
+}
+.mdv-col-resizer:hover, .mdv-col-resizer.dragging { background: var(--accent); opacity: .6; }
+/* 全 ON/OFF マスターと区切り */
+.mdv-col-toggle-all { font-weight: 600; }
+.mdv-tools-sep { display: inline-block; width: 1px; height: 14px; background: var(--border); margin: 0 6px; vertical-align: middle; }
 .markdown-body tr:nth-child(2n) td { background: var(--bg-alt); }
 .markdown-body a { color: var(--accent); text-decoration: none; }
 .markdown-body a:hover { text-decoration: underline; }

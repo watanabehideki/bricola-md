@@ -2,6 +2,12 @@
 
 ブラウザだけで動く、オフライン・単一フォルダ配布の Markdown ビューア／エディタ。サーバ不要。`index.html` を `file://` で開き、[File System Access API](https://developer.mozilla.org/docs/Web/API/File_System_API) で選んだフォルダ（リポジトリ）内の Markdown を一覧・閲覧・編集・保存する。
 
+## 名前の由来
+
+「Bricola」は、文化人類学者 **クロード・レヴィ=ストロース** が『野生の思考』（*La Pensée sauvage*, 1962）で論じた **ブリコラージュ（bricolage）** に由来する。ブリコラージュとは、目的専用の道具をその都度あつらえる技師（エンジニア）とは対照的に、**いま手元にある限られた持ち合わせ（ありあわせの材料）を寄せ集めて作る**やり方を指し、それを行う人を **ブリコルール（bricoleur）** と呼ぶ。
+
+Bricola.md もこの精神に倣う。ビルドもサーバも持たず、ブラウザに既に備わる File System Access API と、同梱した小さなライブラリ群という「ありあわせ」を組み合わせて、`file://` だけで完結する Markdown ツールを成立させている。
+
 ## 特徴
 
 - **サーバ不要・オフライン** — 依存ライブラリを同梱。`index.html` をダブルクリック（`file://`）で起動。
@@ -48,6 +54,6 @@ bricola-md/
   index.html      エントリ。同梱ライブラリと app/*.js を classic script で読み込む
   app/            アプリ本体（Bricola 名前空間の classic script 群）
   styles/         スタイル
-  vendor/         同梱ライブラリ（marked / DOMPurify / js-yaml / turndown）
+  vendor/         同梱ライブラリ（marked / DOMPurify / js-yaml / turndown / mermaid）
   .bricola.yaml   設定の例（実運用では選択するリポジトリ側に置く）
 ```
