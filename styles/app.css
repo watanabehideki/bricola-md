@@ -11,6 +11,9 @@
   --active-bg: #ddf4ff;
   --dir-bg: #eef1f4;
   --dir-hover: #e2e6ea;
+  /* 列チップ ON 色（白っぽい青。濃色文字＋青枠で選択を示す） */
+  --chip-on-bg: #b3d3fa;
+  --chip-on-fg: #0a2540;
 }
 :root[data-theme="dark"] {
   --bg: #0d1117;
@@ -23,6 +26,8 @@
   --active-bg: #1f2d3d;
   --dir-bg: #1b2129;
   --dir-hover: #232b35;
+  --chip-on-bg: #aaccf0;
+  --chip-on-fg: #0a2540;
 }
 
 * { box-sizing: border-box; }
@@ -57,6 +62,17 @@ body {
   font-size: 13px;
 }
 .btn:hover { border-color: var(--accent); color: var(--accent); }
+.repo-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fg);
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.repo-name::before { content: '📁 '; font-weight: 400; }
+.repo-name[hidden] { display: none; }
 .status { font-size: 12px; color: var(--fg-muted); }
 .status[data-kind="error"] { color: #cf222e; }
 .status[data-kind="warn"]  { color: #9a6700; }
@@ -341,9 +357,6 @@ body.left-collapsed.right-collapsed .markdown-body { max-width: none; }
   cursor: col-resize; user-select: none; z-index: 1;
 }
 .mdv-col-resizer:hover, .mdv-col-resizer.dragging { background: var(--accent); opacity: .6; }
-/* 全 ON/OFF マスターと区切り */
-.mdv-col-toggle-all { font-weight: 600; }
-.mdv-tools-sep { display: inline-block; width: 1px; height: 14px; background: var(--border); margin: 0 6px; vertical-align: middle; }
 .markdown-body tr:nth-child(2n) td { background: var(--bg-alt); }
 .markdown-body a { color: var(--accent); text-decoration: none; }
 .markdown-body a:hover { text-decoration: underline; }
@@ -360,23 +373,56 @@ body.left-collapsed.right-collapsed .markdown-body { max-width: none; }
 
 /* ---- テーブル操作 UI (M4) ---- */
 .mdv-table-tools {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px 12px;
-  margin: 1em 0 -0.4em;
+  margin: 1em 0 -0.2em;
   font-size: 12px;
   color: var(--fg-muted);
 }
-.mdv-tools-label { font-weight: 600; }
-.mdv-col-toggle {
-  display: inline-flex;
+.mdv-tools-row {
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
+}
+.mdv-tools-all-row { margin-bottom: 6px; }
+.mdv-tools-label { font-weight: 600; margin-right: 2px; }
+/* カラムチップは等幅セルのグリッドで整列させる（幅に応じて折り返す） */
+.mdv-tools-chip-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 6px;
+}
+.mdv-tools-chip-row .mdv-col-chip {
+  width: 100%;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* 列表示チップ（トグルボタン）。on=表示中 */
+.mdv-col-chip {
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--fg);
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: 12px;
+  line-height: 1.5;
   cursor: pointer;
   user-select: none;
+  white-space: nowrap;
 }
-.mdv-col-toggle input { margin: 0; }
+.mdv-col-chip:hover { border-color: var(--accent); }
+.mdv-col-chip.on {
+  background: var(--chip-on-bg);
+  border-color: var(--accent);
+  color: var(--chip-on-fg);
+}
+/* 「全て」チップ。一部のみ ON のときは中間状態の見た目 */
+.mdv-col-chip-all.partial {
+  background: var(--active-bg);
+  border-color: var(--accent);
+  color: var(--fg);
+  opacity: 1;
+}
 .mdv-filter-row th { padding: 4px 6px; background: var(--bg); }
 .mdv-col-filter {
   width: 100%;

@@ -603,6 +603,7 @@
       setStatus('読み込み中: ' + doc.path);
       const stat = await Bricola.repo.readWithStat(doc.handle);
       Bricola.docstate.load(doc.path, doc.handle, stat);
+      Bricola.tableui.reset(); // 別文書ではテーブル状態を引き継がない (ADR-0007)
       state.text = stat.text;
       el.code.value = state.text;
       state.editMode = false;
@@ -663,6 +664,7 @@
     try {
       const stat = await Bricola.repo.readWithStat(cur.handle);
       Bricola.docstate.load(cur.path, cur.handle, stat);
+      Bricola.tableui.reset(); // 再読込でディスク内容が変わり得るためリセット (ADR-0007)
       state.text = stat.text;
       el.code.value = state.text;
       state.editMode = false;   // 再読み込み後は閲覧モードに戻す
@@ -689,6 +691,12 @@
     el.outline.innerHTML = '';
     el.search.value = '';
     el.pathInput.value = '';
+    // ヘッダにリポジトリ（選択フォルダ）名を表示。FSA は絶対パスを公開しないため
+    // 取得できるのはフォルダ名（handle.name）のみ。
+    const repoName = Bricola.repo.rootHandle ? Bricola.repo.rootHandle.name : '';
+    el.repoName.textContent = repoName;
+    el.repoName.title = repoName ? ('リポジトリ: ' + repoName + '（ブラウザの制約で絶対パスは取得不可）') : '';
+    el.repoName.hidden = !repoName;
     updateDirtyUI();
     renderSidebar();
 
@@ -746,6 +754,7 @@
     el.btnEdit = $('btn-edit');
     el.btnClearSel = $('btn-clear-sel');
     el.btnRestore = $('btn-restore');
+    el.repoName = $('repo-name');
     el.search = $('file-search');
     el.pathInput = $('path-input');
     el.pathCandidates = $('path-candidates');
