@@ -29,7 +29,13 @@
         <h2 class="pane-title">ファイル</h2>
         <button id="btn-clear-sel" class="btn-mini" hidden>選択解除</button>
       </div>
-      <input id="file-search" class="file-search" type="search" placeholder="ファイル検索" />
+      <div class="path-bar">
+        <input id="path-input" class="path-input" type="text"
+               placeholder="パスを入力（TAB で補完）" autocomplete="off" spellcheck="false" />
+        <button id="btn-path-open" class="btn-mini">開く</button>
+      </div>
+      <div id="path-candidates" class="path-candidates" hidden></div>
+      <input id="file-search" class="file-search" type="search" placeholder="開いた md を絞り込み" />
       <div id="file-list" class="file-list"></div>
     </nav>
 
@@ -61,15 +67,13 @@
   <!-- 同梱ライブラリ (ADR-0004): file:// で動かすため classic script -->
   <script src="vendor/marked.min.js"></script>
   <script src="vendor/purify.min.js"></script>
-  <script src="vendor/js-yaml.min.js"></script>
   <script src="vendor/turndown.js"></script>
   <script src="vendor/turndown-plugin-gfm.js"></script>
   <script src="vendor/mermaid.min.js"></script>
 
   <!-- アプリ本体 (classic script / Bricola 名前空間) -->
-  <script src="app/glob.js"></script>
-  <script src="app/config.js"></script>
   <script src="app/repository.js"></script>
+  <script src="app/pathbar.js"></script>
   <script src="app/docstate.js"></script>
   <script src="app/render.js"></script>
   <script src="app/mermaid.js"></script>

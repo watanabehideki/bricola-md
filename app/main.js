@@ -4,11 +4,10 @@
   'use strict';
 
   const el = {};
+  const SESSION_KEY = 'bricola-session'; // 蓄積ノード + 最後に開いた md の永続化 (ADR-0014)
   const state = {
-    cfg: null,            // パース済み設定
-    docs: [],             // 対象 md [{path, handle}]
+    nodes: [],            // 蓄積したディレクトリノード [{path, segments, mds:[{name,path,handle}], expanded}] (ADR-0014)
     selected: new Set(),  // D&D 用の複数選択パス (ADR-0003)
-    expandedDirs: new Set(), // 展開中フォルダのパス（再描画で維持）
     text: '',             // 現在の作業テキスト（唯一の真実 / ADR-0002）
     editMode: false,      // 編集モードか
     view: 'preview',      // 'preview'(WYSIWYG) | 'code'
@@ -32,10 +31,13 @@
     return guardDiscard();
   }
 
-  // パス → ハンドル
+  // パス → ハンドル（蓄積ノード内の md から探す）
   function handleOf(path) {
-    for (let i = 0; i < state.docs.length; i++) {
-      if (state.docs[i].path === path) return state.docs[i].handle;
+    for (let i = 0; i < state.nodes.length; i++) {
+      const mds = state.nodes[i].mds;
+      for (let j = 0; j < mds.length; j++) {
+        if (mds[j].path === path) return mds[j].handle;
+      }
     }
     return null;
   }
@@ -84,24 +86,11 @@
     return true;
   }
 
-  // ---- サイドバー（VSCode 風ディレクトリツリー） ----
+  // ---- サイドバー（蓄積したディレクトリノード / ADR-0014） ----
   let selOrderCache = [];
 
-  // フラットなパス一覧をディレクトリツリーに変換する。
-  function buildTree(docs) {
-    const root = { dirs: {}, files: [] };
-    docs.forEach(function (d) {
-      const parts = d.path.split('/');
-      let node = root;
-      for (let i = 0; i < parts.length - 1; i++) {
-        const name = parts[i];
-        node.dirs[name] = node.dirs[name] || { dirs: {}, files: [] };
-        node = node.dirs[name];
-      }
-      node.files.push({ name: parts[parts.length - 1], path: d.path, handle: d.handle });
-    });
-    return root;
-  }
+  // ノードの表示ラベル（ルートは "/"）。
+  function nodeLabel(node) { return node.path === '' ? '/' : node.path; }
 
   // 1 ファイル行（選択・D&D・順番バッジ・開く を保持）
   function renderFileItem(f) {
@@ -127,7 +116,7 @@
       if (e.metaKey || e.ctrlKey) {
         if (state.selected.has(f.path)) state.selected.delete(f.path);
         else state.selected.add(f.path);
-        renderTree();
+        renderSidebar();
       } else {
         state.selected.clear();
         openDocument({ path: f.path, handle: f.handle });
@@ -141,61 +130,69 @@
     return li;
   }
 
-  // パスの親フォルダ群を展開状態にする（trailing slash 形式）。
-  function expandToPath(path) {
-    const parts = path.split('/');
-    let pre = '';
-    for (let i = 0; i < parts.length - 1; i++) { pre += parts[i] + '/'; state.expandedDirs.add(pre); }
-  }
+  // 1 ディレクトリノード（ヘッダ＋直下 md 一覧）を描画する。
+  // q（検索語）があれば一致する md だけを残し、無一致ノードは null を返して隠す。
+  function renderNode(node, q) {
+    const mds = q
+      ? node.mds.filter(function (m) { return m.name.toLowerCase().indexOf(q) !== -1; })
+      : node.mds;
+    if (q && !mds.length) return null;
 
-  // ツリーを再帰描画。expandAll=true（検索中）は全フォルダ展開。
-  // 展開状態は state.expandedDirs に保持し、再描画で失われないようにする。
-  function renderTreeNode(node, expandAll, prefix) {
+    const li = document.createElement('li');
+    li.className = 'tree-dir';
+    const expanded = q ? true : node.expanded; // 検索中は強制展開
+    if (!expanded) li.classList.add('collapsed');
+
+    const row = document.createElement('div');
+    row.className = 'tree-row dir-row';
+    const chev = document.createElement('span');
+    chev.className = 'chev';
+    chev.textContent = '▸';
+    const icon = document.createElement('span');
+    icon.className = 'dir-icon';
+    const label = document.createElement('span');
+    label.className = 'dir-name';
+    label.textContent = nodeLabel(node);
+    label.title = nodeLabel(node);
+    const del = document.createElement('button');
+    del.className = 'node-del';
+    del.textContent = '×';
+    del.title = 'このディレクトリをサイドバーから外す';
+    del.addEventListener('click', function (e) {
+      e.stopPropagation();
+      removeNode(node);
+    });
+    row.appendChild(chev);
+    row.appendChild(icon);
+    row.appendChild(label);
+    row.appendChild(del);
+    row.addEventListener('click', function () {
+      node.expanded = !node.expanded;
+      persistSession();
+      renderSidebar();
+    });
+
     const ul = document.createElement('ul');
     ul.className = 'tree';
-    Object.keys(node.dirs).sort().forEach(function (dirName) {
-      const dirPath = prefix + dirName + '/';
-      const li = document.createElement('li');
-      li.className = 'tree-dir';
-      const expanded = expandAll || state.expandedDirs.has(dirPath);
-      if (!expanded) li.classList.add('collapsed');
+    mds.slice().sort(function (a, b) { return a.name < b.name ? -1 : a.name > b.name ? 1 : 0; })
+      .forEach(function (m) { ul.appendChild(renderFileItem(m)); });
 
-      const row = document.createElement('div');
-      row.className = 'tree-row dir-row';
-      const chev = document.createElement('span');
-      chev.className = 'chev';
-      chev.textContent = '▸';
-      const icon = document.createElement('span');
-      icon.className = 'dir-icon';
-      const label = document.createElement('span');
-      label.className = 'dir-name';
-      label.textContent = dirName;
-      row.appendChild(chev);
-      row.appendChild(icon);
-      row.appendChild(label);
-      row.addEventListener('click', function () {
-        if (state.expandedDirs.has(dirPath)) state.expandedDirs.delete(dirPath);
-        else state.expandedDirs.add(dirPath);
-        li.classList.toggle('collapsed');
-      });
-
-      li.appendChild(row);
-      li.appendChild(renderTreeNode(node.dirs[dirName], expandAll, dirPath));
-      ul.appendChild(li);
-    });
-    node.files.slice().sort(function (a, b) { return a.name < b.name ? -1 : a.name > b.name ? 1 : 0; })
-      .forEach(function (f) { ul.appendChild(renderFileItem(f)); });
-    return ul;
+    li.appendChild(row);
+    li.appendChild(ul);
+    return li;
   }
 
-  function renderTree() {
+  function renderSidebar() {
     el.fileList.innerHTML = '';
     selOrderCache = orderedSelected();
-    const cur = Bricola.docstate.cur;
-    if (cur) expandToPath(cur.path); // 現在ファイルまでの経路は展開
     const q = (el.search.value || '').trim().toLowerCase();
-    const docs = q ? state.docs.filter(function (d) { return d.path.toLowerCase().indexOf(q) !== -1; }) : state.docs;
-    el.fileList.appendChild(renderTreeNode(buildTree(docs), q !== '', ''));
+    const ul = document.createElement('ul');
+    ul.className = 'tree tree-root';
+    state.nodes.forEach(function (node) {
+      const li = renderNode(node, q);
+      if (li) ul.appendChild(li);
+    });
+    el.fileList.appendChild(ul);
 
     const active = el.fileList.querySelector('.tree-file.active');
     if (active) active.scrollIntoView({ block: 'nearest' });
@@ -203,7 +200,166 @@
   }
 
   // 既存呼び出し名の互換
-  function renderFileList() { renderTree(); }
+  function renderFileList() { renderSidebar(); }
+
+  // ---- ディレクトリノードの操作 / パス指定ロード (ADR-0014) ----
+
+  function splitPath(p) {
+    return String(p || '').split('/').filter(function (s) { return s.length > 0; });
+  }
+  function byName(a, b) { return a.name < b.name ? -1 : a.name > b.name ? 1 : 0; }
+  function findNode(path) {
+    for (let i = 0; i < state.nodes.length; i++) {
+      if (state.nodes[i].path === path) return state.nodes[i];
+    }
+    return null;
+  }
+
+  // ディレクトリ直下の md だけを {name, path, handle} で返す（再帰しない・ライブ読込）。
+  async function listMdOfDir(segments) {
+    const entries = await Bricola.repo.listDir(segments);
+    const prefix = segments.length ? segments.join('/') + '/' : '';
+    return entries
+      .filter(function (e) { return e.kind === 'file' && /\.md$/i.test(e.name); })
+      .map(function (e) { return { name: e.name, path: prefix + e.name, handle: e.handle }; })
+      .sort(byName);
+  }
+
+  // ディレクトリ指定: 直下 md を全部出すノード（kind:'dir'）。既存は再利用＝重複させない。
+  // 直下 md 0 件で新規なら追加せず null を返す。成功時はノードを返す。
+  async function addDirNode(segments) {
+    const path = segments.join('/');
+    const mds = await listMdOfDir(segments); // 毎回ライブで entries() し直す
+    let node = findNode(path);
+    if (node) {
+      node.kind = 'dir';
+      node.mds = mds;       // 内容を最新化（kind:'files' だったら昇格）
+      node.expanded = true;
+    } else {
+      if (!mds.length) return null; // 0 件は新規追加しない
+      node = { path: path, segments: segments.slice(), kind: 'dir', mds: mds, expanded: true };
+      state.nodes.push(node);
+    }
+    return node;
+  }
+
+  // ファイル指定: その md「だけ」をノードに足す（kind:'files'）。親 dir でグルーピングするが
+  // 直下全部は出さない。同じ親に既に dir ノードがあればそれを使い、files ノードなら和集合。
+  // 戻り値 { node, md }。
+  async function addFileNode(segments, handle) {
+    const parentSegs = segments.slice(0, -1);
+    const parentPath = parentSegs.join('/');
+    const name = segments[segments.length - 1];
+    const path = parentPath ? parentPath + '/' + name : name;
+    if (!handle) handle = await Bricola.repo.getFileHandleByPath(segments);
+    const md = { name: name, path: path, handle: handle };
+
+    let node = findNode(parentPath);
+    if (node) {
+      node.expanded = true;
+      const existing = node.mds.filter(function (m) { return m.path === path; })[0];
+      if (existing) return { node: node, md: existing };
+      node.mds.push(md);          // dir ノードでも欠けていれば足す / files ノードは和集合
+      node.mds.sort(byName);
+      return { node: node, md: md };
+    }
+    node = { path: parentPath, segments: parentSegs, kind: 'files', mds: [md], expanded: true };
+    state.nodes.push(node);
+    return { node: node, md: md };
+  }
+
+  function removeNode(node) {
+    const i = state.nodes.indexOf(node);
+    if (i !== -1) state.nodes.splice(i, 1);
+    persistSession();
+    renderSidebar();
+  }
+
+  // パスバー確定時の処理。FS 種別で自動判定（ADR-0014）。
+  async function openPath(input) {
+    if (!Bricola.repo.rootHandle) {
+      setStatus('先に「リポジトリを選択」してください。', 'error');
+      return;
+    }
+    let res;
+    try {
+      res = await Bricola.repo.resolvePath(input);
+    } catch (e) {
+      setStatus('パスの解決に失敗: ' + (e && e.message ? e.message : e), 'error');
+      return;
+    }
+    if (res.kind === 'missing') {
+      setStatus('パスが見つかりません: ' + (input || '(空)'), 'error');
+      return;
+    }
+    if (res.kind === 'file') {
+      const last = res.segments[res.segments.length - 1];
+      if (!/\.md$/i.test(last)) {
+        setStatus('md ファイルではありません: ' + input, 'error');
+        return;
+      }
+      const added = await addFileNode(res.segments, res.handle); // 指定した md だけを足す
+      persistSession();
+      renderSidebar();
+      if (added && added.md) openDocument({ path: added.md.path, handle: added.md.handle });
+      el.pathInput.value = '';
+      return;
+    }
+    // ディレクトリ
+    const node = await addDirNode(res.segments);
+    if (!node) {
+      setStatus('このディレクトリ直下に md はありません: ' + (input || '/'), 'warn');
+      return;
+    }
+    persistSession();
+    renderSidebar();
+    setStatus(nodeLabel(node) + ' を開きました（直下 md ' + node.mds.length + ' 件）。');
+    el.pathInput.value = '';
+  }
+
+  // 蓄積ノードと最後に開いた md を localStorage に保存（ADR-0014）。
+  // dir ノードはパスのみ（復元時に再 entries()）。files ノードは個別 md パスを保存。
+  function persistSession() {
+    try {
+      localStorage.setItem(SESSION_KEY, JSON.stringify({
+        nodes: state.nodes.map(function (n) {
+          return n.kind === 'files'
+            ? { path: n.path, kind: 'files', expanded: n.expanded, files: n.mds.map(function (m) { return m.path; }) }
+            : { path: n.path, kind: 'dir', expanded: n.expanded };
+        }),
+        open: Bricola.docstate.cur ? Bricola.docstate.cur.path : null
+      }));
+    } catch (e) { /* 永続化失敗は致命的でない */ }
+  }
+
+  // 保存済みセッションを復元する。dir は再 entries()、files は各 md を再解決して足す。
+  async function restoreSession() {
+    let saved;
+    try { saved = JSON.parse(localStorage.getItem(SESSION_KEY) || 'null'); }
+    catch (e) { saved = null; }
+    if (!saved || !saved.nodes) return;
+    for (let i = 0; i < saved.nodes.length; i++) {
+      const rec = saved.nodes[i];
+      try {
+        if (rec.kind === 'files') {
+          let node = null;
+          const files = rec.files || [];
+          for (let j = 0; j < files.length; j++) {
+            try { node = (await addFileNode(splitPath(files[j]))).node; } catch (e) { /* 消えた md はスキップ */ }
+          }
+          if (node && rec.expanded === false) node.expanded = false;
+        } else {
+          const node = await addDirNode(splitPath(rec.path));
+          if (node && rec.expanded === false) node.expanded = false;
+        }
+      } catch (e) { /* 消えた/権限切れはスキップ */ }
+    }
+    renderSidebar();
+    if (saved.open) {
+      const h = handleOf(saved.open);
+      if (h) await openDocument({ path: saved.open, handle: h });
+    }
+  }
 
   // ドラッグされたファイル群を結合した md スニペットを作る（実体貼付 / ADR-0003）。
   async function buildSnippet(paths) {
@@ -452,7 +608,8 @@
       state.editMode = false;
       state.view = 'preview';
       state.previewTouched = false;
-      renderTree();
+      renderSidebar();
+      persistSession();
       await refreshView();
       setStatus(doc.path);
     } catch (e) {
@@ -518,52 +675,35 @@
     }
   }
 
-  // ---- リポジトリ選択〜一覧構築 ----
-  // 設定読込・走査・描画（rootHandle が設定・許可済みである前提）。
-  async function loadFromRoot() {
-    // 設定は選択リポジトリ直下の .bricola.yaml を FSA で読む (ADR-0011)。
-    // file:// では fetch 不可だが、FSA ハンドル経由なら起動時に読める。
-    // glob は「選択した repo」を起点に評価する（config.matches はルート相対パス判定）。
-    let cfgText;
-    try {
-      cfgText = await Bricola.repo.readConfigText();
-    } catch (e) {
-      setStatus('設定ファイル ' + Bricola.repo.CONFIG_NAME + ' が見つかりません。リポジトリ直下に作成してください。', 'error');
-      return;
-    }
-    try {
-      state.cfg = Bricola.config.parse(cfgText);
-    } catch (e) {
-      setStatus('設定の解析に失敗: ' + e.message, 'error');
-      return;
-    }
-
-    setStatus('走査中...');
-    const all = await Bricola.repo.walk();
-    state.docs = all
-      .filter(function (f) { return Bricola.config.matches(f.path, state.cfg); })
-      .sort(function (a, b) { return a.path < b.path ? -1 : a.path > b.path ? 1 : 0; });
-
+  // ---- リポジトリ初期化（rootHandle が設定・許可済みである前提 / ADR-0014）----
+  // restore=true: 前回のセッション（蓄積ノード＋最後の md）を復元。
+  // restore=false: セッションを破棄し空のサイドバーから開始（リポジトリ選び直し）。
+  async function initRepo(restore) {
     Bricola.docstate.clear();
     Bricola.assets.revokeAll();
+    state.nodes = [];
     state.selected.clear();
     state.text = '';
     el.preview.innerHTML = '';
     el.code.value = '';
     el.outline.innerHTML = '';
     el.search.value = '';
+    el.pathInput.value = '';
     updateDirtyUI();
-    renderTree();
+    renderSidebar();
 
-    if (!state.docs.length) {
-      setStatus('対象 md が 0 件でした。include/exclude を確認してください。', 'warn');
+    if (restore) {
+      await restoreSession();
+      setStatus(state.nodes.length
+        ? 'セッションを復元しました。パスを入力して md を開けます（TAB で補完）。'
+        : 'パスを入力して md を開いてください（TAB で補完）。');
     } else {
-      setStatus(state.docs.length + ' 件の md を読み込みました。');
-      openDocument(state.docs[0]);
+      try { localStorage.removeItem(SESSION_KEY); } catch (e) { /* noop */ }
+      setStatus('パスを入力して md を開いてください（TAB で補完）。');
     }
   }
 
-  // ピッカーでフォルダを選び直す。
+  // ピッカーでフォルダを選び直す（＝セッションは破棄して空から）。
   async function selectRepository() {
     if (!Bricola.repo.supported()) {
       setStatus('このブラウザは File System Access API 非対応です。Chrome / Edge をご利用ください。', 'error');
@@ -579,10 +719,10 @@
     }
     try { await Bricola.repo.saveRoot(); } catch (e) { /* 永続化失敗は致命的でない */ }
     el.btnRestore.hidden = true;
-    await loadFromRoot();
+    await initRepo(false);
   }
 
-  // 前回のフォルダをリロード後に再開する（要権限再付与・ユーザ操作）。
+  // 前回のフォルダをリロード後に再開する（要権限再付与・ユーザ操作・セッション復元）。
   async function restoreRepository(handle) {
     if (!confirmLeaveEdit()) return;
     Bricola.repo.rootHandle = handle;
@@ -590,7 +730,7 @@
     try { ok = await Bricola.repo.ensureWritable(handle); } catch (e) { ok = false; }
     if (!ok) { setStatus('フォルダへのアクセスが許可されませんでした。', 'error'); return; }
     el.btnRestore.hidden = true;
-    await loadFromRoot();
+    await initRepo(true);
   }
 
   // ---- 起動 ----
@@ -607,6 +747,9 @@
     el.btnClearSel = $('btn-clear-sel');
     el.btnRestore = $('btn-restore');
     el.search = $('file-search');
+    el.pathInput = $('path-input');
+    el.pathCandidates = $('path-candidates');
+    el.btnPathOpen = $('btn-path-open');
     el.modal = $('convert-modal');
     el.convPreview = $('convert-preview');
     el.convWarnings = $('convert-warnings');
@@ -620,7 +763,15 @@
     el.btnSave.addEventListener('click', save);
     $('btn-reload').addEventListener('click', reload);
     $('btn-theme').addEventListener('click', function () { Bricola.theme.toggle(); });
-    el.search.addEventListener('input', renderTree);
+    el.search.addEventListener('input', renderSidebar);
+
+    // パスバー + TAB 補完 (ADR-0014)
+    Bricola.pathbar.init({
+      input: el.pathInput,
+      candidates: el.pathCandidates,
+      button: el.btnPathOpen,
+      onOpen: openPath
+    });
 
     // サイドバー折りたたみ（左右それぞれ・状態を localStorage に保持）
     const leftBtn = $('btn-toggle-sidebar');
@@ -697,7 +848,7 @@
       let perm = 'prompt';
       try { perm = await handle.queryPermission({ mode: 'readwrite' }); } catch (e) { /* noop */ }
       if (perm === 'granted') {
-        await loadFromRoot(); // 権限が残っているので自動再開
+        await initRepo(true); // 権限が残っているのでセッション復元して自動再開
         return;
       }
       // 権限がリセットされている場合はユーザ操作が必要（1クリックで再開）。

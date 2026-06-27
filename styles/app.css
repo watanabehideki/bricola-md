@@ -136,6 +136,45 @@ body.right-collapsed .sidebar-right { display: none; }
 /* ---- ファイル一覧 ---- */
 .outline { list-style: none; margin: 0; padding: 0; }
 
+/* ---- パスバー + TAB 補完 (ADR-0014) ---- */
+.path-bar { display: flex; gap: 6px; margin-bottom: 6px; }
+.path-input {
+  flex: 1;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+.path-input:focus { outline: none; border-color: var(--accent); }
+.path-bar .btn-mini { margin-bottom: 0; white-space: nowrap; }
+.path-candidates {
+  margin-bottom: 8px;
+  max-height: 180px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+}
+.path-candidates[hidden] { display: none; }
+.path-cand {
+  padding: 3px 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  color: var(--fg-muted);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.path-cand:hover { background: var(--dir-hover); color: var(--fg); }
+.path-cand.is-dir { color: var(--fg); font-weight: 600; }
+.path-cand.active { background: var(--active-bg); color: var(--fg); }
+
 /* ---- ファイル検索 ---- */
 .file-search {
   width: 100%;
@@ -176,7 +215,27 @@ body.right-collapsed .sidebar-right { display: none; }
 .tree-dir:not(.collapsed) > .tree-row .chev { transform: rotate(90deg); }
 .dir-icon::before { content: '📁'; font-size: 12px; }
 .tree-dir:not(.collapsed) > .tree-row .dir-icon::before { content: '📂'; }
-.dir-name { font-weight: 600; }
+.dir-name {
+  font-weight: 600;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.node-del {
+  border: none;
+  background: none;
+  color: var(--fg-muted);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 0 2px;
+  border-radius: 4px;
+  opacity: 0;
+}
+.tree-row:hover .node-del { opacity: 1; }
+.node-del:hover { color: #cf222e; background: var(--bg); }
 .tree-file {
   display: flex;
   align-items: center;

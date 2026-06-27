@@ -1,10 +1,13 @@
-// repository.js — File System Access API ラッパ (ADR-0001, ADR-0011)
-// ルートディレクトリの選択・設定読込（選択 repo 内 .bricola.yaml を FSA で）・配下走査・ファイル読取りを担う。
-// M1 では読取りのみ。書込み/競合検知は M3 で追加する。
+// repository.js — File System Access API ラッパ (ADR-0001, ADR-0011, ADR-0014)
+// ルートディレクトリの選択・パス解決・1 階層の列挙・ファイル読取り/書込みを担う。
+// 設定（.bricola.yaml）や全木走査は ADR-0014 で廃止。パス指定で必要な階層だけを辿る。
 (function (Bricola) {
   'use strict';
 
-  const CONFIG_NAME = '.bricola.yaml';
+  // ルート相対パス文字列を空要素を除いたセグメント配列にする。
+  function splitPath(p) {
+    return String(p || '').split('/').filter(function (s) { return s.length > 0; });
+  }
 
   const repo = {
     rootHandle: null,
@@ -20,29 +23,41 @@
       return this.rootHandle;
     },
 
-    // 選択リポジトリ直下の設定ファイル .bricola.yaml を読む。
-    // file:// では fetch 不可のため FSA ハンドル経由で読む（ADR-0011）。無ければ NotFoundError。
-    readConfigText: async function () {
-      const h = await this.rootHandle.getFileHandle(CONFIG_NAME);
-      const f = await h.getFile();
-      return await f.text();
+    // セグメント配列の指すディレクトリハンドルを辿る（segments=[] はルート自身）。
+    getDirHandleByPath: async function (segments) {
+      let dir = this.rootHandle;
+      for (let i = 0; i < segments.length; i++) {
+        dir = await dir.getDirectoryHandle(segments[i]);
+      }
+      return dir;
     },
 
-    // 配下の全ファイルを {path, handle} で列挙する（path はルート相対）。
-    walk: async function () {
+    // 1 ディレクトリの直下エントリだけを列挙する（再帰しない / ADR-0014）。
+    // TAB 補完とノード展開の共通土台。全木は舐めない＝起動が重くならない。
+    // 返り値: [{ name, kind:'file'|'directory', handle }]
+    listDir: async function (segments) {
+      const dir = await this.getDirHandleByPath(segments);
       const out = [];
-      async function recurse(dirHandle, prefix) {
-        for await (const [name, handle] of dirHandle.entries()) {
-          const p = prefix ? prefix + '/' + name : name;
-          if (handle.kind === 'directory') {
-            await recurse(handle, p);
-          } else {
-            out.push({ path: p, handle: handle });
-          }
-        }
+      for await (const [name, handle] of dir.entries()) {
+        out.push({ name: name, kind: handle.kind, handle: handle });
       }
-      await recurse(this.rootHandle, '');
       return out;
+    },
+
+    // ルート相対パスを FS 上の種別で解決する（ADR-0014）。
+    // 返り値: { kind:'dir'|'file'|'missing', segments, handle? }
+    resolvePath: async function (path) {
+      const segments = splitPath(path);
+      if (!segments.length) return { kind: 'dir', segments: [], handle: this.rootHandle };
+      try {
+        const handle = await this.getDirHandleByPath(segments);
+        return { kind: 'dir', segments: segments, handle: handle };
+      } catch (e) { /* ディレクトリではない → ファイルを試す */ }
+      try {
+        const handle = await this.getFileHandleByPath(segments);
+        return { kind: 'file', segments: segments, handle: handle };
+      } catch (e) { /* ファイルでもない */ }
+      return { kind: 'missing', segments: segments };
     },
 
     // ファイルハンドルからテキストを読む。
@@ -119,6 +134,5 @@
     }
   };
 
-  repo.CONFIG_NAME = CONFIG_NAME;
   Bricola.repo = repo;
 })(window.Bricola = window.Bricola || {});
