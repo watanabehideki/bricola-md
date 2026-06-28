@@ -16,11 +16,31 @@
     return td;
   }
 
+  // セル内専用サービス: md エスケープを抑止する。turndown 既定のエスケープは
+  // 全角テキストや識別子（例 n3_cont_010）に不要な \ を入れ、桁揃えや
+  // tableUnchanged の判定を崩す。太字・リンク等はエスケープではなくルールが
+  // 生成するので、抑止しても影響を受けない。
+  let tdInline = null;
+  function inlineService() {
+    if (tdInline) return tdInline;
+    tdInline = new window.TurndownService({ emDelimiter: '*', bulletListMarker: '-' });
+    if (window.turndownPluginGfm) tdInline.use(window.turndownPluginGfm.gfm);
+    tdInline.escape = function (s) { return s; };
+    return tdInline;
+  }
+
   // --- テーブル直列化の補助 ---
   function normWs(s) { return String(s).replace(/\r?\n+/g, ' ').replace(/\s+/g, ' ').trim(); }
   function escPipe(s) { return String(s).replace(/\|/g, '\\|'); }
-  // DOM セル（th/td）→ インライン md（太字・リンク等を温存）
-  function domCell(td) { return normWs(service().turndown(td.innerHTML)); }
+  // DOM セル（th/td）→ インライン md（太字・リンク等を温存、エスケープは抑止）
+  function domCell(td) { return normWs(inlineService().turndown(td.innerHTML)); }
+  // raw セル文字列を DOM セルと同一経路（marked → sanitize → turndown）に通した正規形。
+  // DOM 側に掛かるエスケープ/往復ロスと同じ変換を raw 側にも掛けて相殺し、
+  // 往復ロスのあるセルでも両側に同じロスがかかって未編集と正しく判定できる。
+  function rawCellNorm(text) {
+    const html = window.DOMPurify.sanitize(window.marked.parseInline(String(text)));
+    return normWs(inlineService().turndown(html));
+  }
   // raw の 1 行を `|` 区切り（エスケープ考慮）でセル配列へ
   function splitRawCells(line) {
     let s = line.trim();
@@ -32,6 +52,7 @@
     const lines = raw.replace(/\n+$/, '').split('\n').filter(function (l) { return l.trim() !== ''; });
     if (lines.length < 2) return null;
     return {
+      lines: lines,                          // 原文行（桁揃えを温存して出力するため保持）
       header: splitRawCells(lines[0]),
       delim: lines[1],
       body: lines.slice(2).map(splitRawCells)
@@ -45,6 +66,14 @@
     });
     return { header: header, body: body };
   }
+  // DOM 行と raw 行が一致するか（rawCellNorm で対称正規化して比較）。長さ違いは編集扱い。
+  function rowUnchanged(domCells, rawCells) {
+    if (domCells.length !== rawCells.length) return false;
+    for (let i = 0; i < domCells.length; i++) {
+      if (domCells[i] !== rawCellNorm(rawCells[i])) return false;
+    }
+    return true;
+  }
 
   Bricola.editor = {
     // 編集後 HTML → Markdown 本文
@@ -52,7 +81,7 @@
       return service().turndown(html).trim() + '\n';
     },
 
-    // ---- テーブル専用: セル値のみ差し替え、構造を壊さない (ADR-0003 隣接の課題) ----
+    // ---- テーブル専用: セル値のみ差し替え、構造を壊さない（行単位の最小差分 / ADR-0010）----
     serializeTable: function (table, raw) {
       const parsed = parseTableRaw(raw);
       const grid = domGrid(table);
@@ -64,18 +93,33 @@
       }
       if (!delim) delim = '| ' + new Array(n).fill('---').join(' | ') + ' |';
       const rowOf = function (cells) { return '| ' + cells.map(escPipe).join(' | ') + ' |'; };
-      const lines = [rowOf(grid.header), delim];
-      grid.body.forEach(function (r) { lines.push(rowOf(r)); });
+      // 未編集行、または DOM 側で列が欠落している行（marked が描画時に詰めるケース）は
+      // 原文行をそのまま使い、桁揃えの温存とデータ損失の防止を両立する。
+      const keepRaw = function (domCells, rawCells) {
+        return domCells.length !== rawCells.length || rowUnchanged(domCells, rawCells);
+      };
+      const headerLine = (parsed && keepRaw(grid.header, parsed.header)) ? parsed.lines[0] : rowOf(grid.header);
+      const lines = [headerLine, delim];
+      const sameShape = parsed && parsed.body.length === grid.body.length;
+      grid.body.forEach(function (r, i) {
+        if (sameShape && keepRaw(r, parsed.body[i])) lines.push(parsed.lines[2 + i]);
+        else lines.push(rowOf(r));
+      });
       return lines.join('\n') + '\n';
     },
 
-    // DOM のセル値が元 md と一致するか（未編集判定）。
+    // DOM のセル値が元 md と一致するか（未編集判定）。比較は rawCellNorm で対称化し、
+    // 往復ロスのあるセルも「変更」と誤判定しない。
     tableUnchanged: function (table, raw) {
       const parsed = parseTableRaw(raw);
       if (!parsed) return false;
       const grid = domGrid(table);
-      const norm = function (header, body) { return JSON.stringify([header].concat(body)); };
-      return norm(parsed.header, parsed.body) === norm(grid.header, grid.body);
+      if (!rowUnchanged(grid.header, parsed.header)) return false;
+      if (grid.body.length !== parsed.body.length) return false;
+      for (let i = 0; i < grid.body.length; i++) {
+        if (!rowUnchanged(grid.body[i], parsed.body[i])) return false;
+      }
+      return true;
     },
 
     // 元 md に対し、turndown 往復で失われやすい記法を警告として列挙する。
