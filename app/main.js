@@ -13,7 +13,7 @@
     view: 'preview',      // 'preview'(WYSIWYG) | 'code'
     previewTouched: false,// プレビュー編集の未同期フラグ（未保存表示用）
     fm: '',               // 編集中文書の frontmatter（温存用 / ADR-0010）
-    blocks: { raw: [], html: [] } // ブロック単位の最小差分用スナップショット
+    blocks: { raw: [], html: [], gapAfter: [], leadingWS: '' } // ブロック単位の最小差分用スナップショット（gap=原文の空行温存 / ADR-0010）
   };
 
   // 別文書/リポジトリへ移る前の確認。続行可なら true。
@@ -455,24 +455,38 @@
   }
 
   // プレビューをブロック分割し contentEditable 化（WYSIWYG / ブロック最小差分）。
+  // space トークン（ブロック間の空行）は DOM 化せず gapAfter / leadingWS に温存し、
+  // 保存時に未編集領域の空白を原形のまま復元できるようにする（ADR-0010）。
   async function buildWysiwyg() {
     const split = Bricola.render.splitFrontmatter(state.text);
     state.fm = split.fm;
-    state.blocks = { raw: [], html: [] };
+    state.blocks = { raw: [], html: [], gapAfter: [], leadingWS: '' };
     state.previewTouched = false;
 
     const tokens = window.marked.lexer(split.body);
     el.preview.innerHTML = '';
+    let pendingGap = '';   // 直前ブロックの後ろに続く空行の生テキスト
+    let started = false;   // 最初のブロックが出たか
     tokens.forEach(function (tok) {
-      if (tok.type === 'space') return;
+      if (tok.type === 'space') {
+        if (started) pendingGap += tok.raw; else state.blocks.leadingWS += tok.raw;
+        return;
+      }
+      if (started) state.blocks.gapAfter[state.blocks.raw.length - 1] = pendingGap;
+      pendingGap = '';
+      started = true;
       const wrap = document.createElement('div');
       wrap.className = 'mdv-block';
       wrap.dataset.idx = String(state.blocks.raw.length);
       if (tok.type === 'table') wrap.dataset.mdvTable = '1'; // テーブルはセル単位で扱う
       wrap.innerHTML = Bricola.render.toHtml(tok.raw);
       state.blocks.raw.push(tok.raw);
+      state.blocks.gapAfter.push(''); // 既定（末尾ブロックなら下で末尾空行を入れる）
       el.preview.appendChild(wrap);
     });
+    // 末尾に残った空行（最後のブロックの後ろ）を温存する。
+    if (started) state.blocks.gapAfter[state.blocks.raw.length - 1] = pendingGap;
+    else state.blocks.leadingWS += pendingGap;
     await Bricola.assets.resolve(el.preview, Bricola.docstate.cur.path);
     Bricola.tableui.enhance(el.preview); // 編集中も列トグル・絞り込みを使える (ADR-0007)
     Array.prototype.forEach.call(el.preview.children, function (wrap) {
@@ -482,37 +496,76 @@
     el.preview.classList.add('editing');
   }
 
-  // 編集後 DOM → md（未編集ブロックは原文保持 / ADR-0002, 0010）。
+  // 編集後 DOM → md。未編集ブロックは原文 raw を、ブロック間の空行も原文 gap を
+  // そのまま温存し、編集したブロックだけ再シリアライズする（最小差分 / ADR-0002, 0010）。
   function computeWysiwygMd() {
-    const parts = [];
+    const b = state.blocks;
+    const pieces = [];
     const changedSources = [];
+    let prevIdx = -1;   // 直前に出力した既存ブロックの原文インデックス
+    let first = true;
+
+    // raw 末尾の改行列（marked は空行を後続 space トークンへ回すため、無ければ空）。
+    // 編集ブロックを原文と同じ末尾で閉じ、空行は後続 gap がそのまま担う。
+    function tailOf(raw) {
+      const m = raw && raw.match(/\n+$/);
+      return m ? m[0] : '';
+    }
+    // piece を、原文で隣接する未編集の並びなら原文 gap で、そうでなければ
+    // 最低 1 空行になるよう不足分だけ補って前に繋ぐ（構造変化した箇所のみ）。
+    function emit(piece, idx) {
+      if (first) {
+        if (idx === 0 && b.leadingWS) pieces.push(b.leadingWS);
+        first = false;
+      } else if (idx >= 0 && prevIdx >= 0 && idx === prevIdx + 1) {
+        pieces.push(b.gapAfter[prevIdx] || '');
+      } else {
+        const prev = pieces.length ? pieces[pieces.length - 1] : '';
+        const have = (prev.match(/\n+$/) || [''])[0].length;
+        pieces.push('\n'.repeat(Math.max(0, 2 - have))); // 区切りを 1 空行に揃える
+      }
+      pieces.push(piece);
+      prevIdx = idx;
+    }
+
     Array.prototype.forEach.call(el.preview.childNodes, function (node) {
       if (node.nodeType === 3) {
-        const txt = node.textContent.replace(/^\n+/, '').replace(/\n+$/, '');
-        if (txt.trim() !== '') parts.push(txt);
+        const txt = node.textContent.replace(/^\s+|\s+$/g, '');
+        if (txt !== '') emit(txt + '\n', -1);
         return;
       }
       if (node.nodeType !== 1) return;
       const idxAttr = node.dataset ? node.dataset.idx : undefined;
       const i = (idxAttr !== undefined) ? +idxAttr : -1;
-      let md;
-      // テーブルはセル値のみ差し替え、構造を温存（turndown を通さない）。
+      let piece;
       if (node.dataset && node.dataset.mdvTable === '1' && i >= 0) {
+        // テーブルはセル値のみ差し替え、構造を温存（turndown を通さない）。
         const table = node.querySelector('table');
-        md = (table && Bricola.editor.tableUnchanged(table, state.blocks.raw[i]))
-          ? state.blocks.raw[i]
-          : (table ? Bricola.editor.serializeTable(table, state.blocks.raw[i]) : state.blocks.raw[i]);
-      } else if (i >= 0 && node.innerHTML === state.blocks.html[i]) {
-        md = state.blocks.raw[i];
+        const raw = b.raw[i];
+        if (table && Bricola.editor.tableUnchanged(table, raw)) {
+          piece = raw;
+        } else if (table) {
+          piece = Bricola.editor.serializeTable(table, raw).replace(/\n+$/, '') + tailOf(raw);
+        } else {
+          piece = raw;
+        }
+      } else if (i >= 0 && node.innerHTML === b.html[i]) {
+        piece = b.raw[i]; // 無編集：原文そのまま（前後の空白も保たれる）
+      } else if (i >= 0) {
+        piece = Bricola.editor.toMarkdown(node.innerHTML).replace(/\n+$/, '') + tailOf(b.raw[i]);
+        changedSources.push(b.raw[i]);
       } else {
-        md = Bricola.editor.toMarkdown(i >= 0 ? node.innerHTML : node.outerHTML);
-        if (i >= 0) changedSources.push(state.blocks.raw[i]);
+        const md = Bricola.editor.toMarkdown(node.outerHTML).replace(/\n+$/, '');
+        if (md === '') return;
+        piece = md + '\n';
       }
-      md = md.replace(/^\n+/, '').replace(/\n+$/, '');
-      if (md !== '') parts.push(md);
+      emit(piece, i);
     });
-    const body = parts.length ? parts.join('\n\n') + '\n' : '';
-    const newText = state.fm ? state.fm + body : body;
+
+    // 末尾ブロックの後ろの空行（原文末尾の空白）を温存する。
+    if (prevIdx >= 0) pieces.push(b.gapAfter[prevIdx] || '');
+
+    const newText = state.fm + pieces.join('');
     return {
       newText: newText,
       warnings: Bricola.editor.detectLossRisks(changedSources.join('\n')),
