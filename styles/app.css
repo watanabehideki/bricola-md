@@ -334,8 +334,9 @@ body.left-collapsed.right-collapsed .markdown-body { max-width: none; }
   color: var(--fg-muted);
   border-left: 3px solid var(--border);
 }
-/* 横長テーブルはこのラッパ内だけが横スクロールする（tableui.js が付与） */
-.md-table-scroll { overflow-x: auto; max-width: 100%; margin: 1em 0; }
+/* 横長テーブルはラッパ内で横スクロール。縦に長いテーブルは max-height を超えると
+   ラッパ内で縦スクロールし、thead を固定表示して見ている列が分かるようにする。 */
+.md-table-scroll { overflow: auto; max-height: 75vh; max-width: 100%; margin: 1em 0; }
 .markdown-body table {
   border-collapse: collapse;
   width: 100%;
@@ -343,6 +344,10 @@ body.left-collapsed.right-collapsed .markdown-body { max-width: none; }
   font-size: 14px;
 }
 .md-table-scroll > table { margin: 0; }
+/* スクロール時にヘッダ行を上端へ固定（見出し行＋フィルタ行をまとめて） */
+.md-table-scroll thead { position: sticky; top: 0; z-index: 2; }
+/* border-collapse だと固定時に枠線が消えるため、inset 影で上下の罫線を保つ */
+.md-table-scroll thead th { box-shadow: inset 0 1px 0 var(--border), inset 0 -1px 0 var(--border); }
 .markdown-body th, .markdown-body td {
   border: 1px solid var(--border);
   padding: 6px 12px;
